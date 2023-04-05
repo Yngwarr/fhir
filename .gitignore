@@ -1,0 +1,5 @@
+.cpcache/
+dev-resources/
+target/
+resources/public/js/compiled/app.js
+.nrepl-port
