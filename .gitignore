@@ -1,5 +1,7 @@
 .cpcache/
 dev-resources/
 target/
-resources/public/js/compiled/app.js
+.clj-kondo/
+.lsp/
 .nrepl-port
+*.log
