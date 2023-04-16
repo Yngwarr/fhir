@@ -8,36 +8,74 @@
 (def Insertion lambdaisland.deep_diff2.diff_impl.Insertion)
 (def Deletion lambdaisland.deep_diff2.diff_impl.Deletion)
 
+(defn diff-record? [value]
+  (let [t (type value)]
+    (or (= t Mismatch) (= t Insertion) (= t Deletion))))
+
 (defn strip-url [url]
   (last (str/split url #"/")))
 
-(defn diff-name
-  "Gets the name of the Mismatch, Insertion or Deletion. Fails with an exception."
-  [value]
-  (let [val-type (type value)]
+(defn strip-diff-record [value]
+  (let [t (type value)]
     (cond
-      (= val-type Insertion) (str "+" (name (:+ value)))
-      (= val-type Deletion) (str "-" (name (:- value)))
-      (= val-type Mismatch) (str "+" (name (:+ value)) " -" (name (:- value))))))
+      (= t Insertion) (:+ value)
+      (= t Deletion) (:- value)
+      :else value)))
 
 (defn get-name
   "Tries to get the name of a symbol. On fail, tries to get the name of a
   mismatch. Fails with an exception."
   [value]
-  (try
-    (name value)
-    (catch ClassCastException e
-      (diff-name value))))
+  (let [v (strip-diff-record value)]
+    (try
+      (name v)
+      (catch ClassCastException _e v))))
+
+(defn tag [k v]
+  (cond
+    (= (type v) Mismatch) :mismatch
+    (= (type k) Deletion) :deletion
+    (= (type k) Insertion) :insertion
+    (map? v) :map
+    (vector? v) :vector
+    :else :atom))
+
+(defn join-path [path]
+  (str/join "." (map get-name path)))
+
+(defn val->str [value]
+  (let [s (str value)
+        lim 32]
+    (if (> (count s) lim)
+      (str (subs s 0 lim) "...")
+      s)))
 
 (defn traverse
   ([root] (traverse root []))
   ([root path]
-   (if (map? root)
-     ; traverse deeper
-     (doseq [leaf (seq root)]
-       (traverse (second leaf) (conj path (first leaf))))
-     ; got to the leaf
-     (println (str (str/join "." (map get-name path)) ": " root)))))
+   (let [p (join-path path)]
+     (case (tag (last path) root)
+       :mismatch
+       (println p ":" (val->str (:- root)) "->" (val->str (:+ root)))
+
+       :deletion
+       (println "-" p)
+
+       :insertion
+       (println "+" p)
+
+       :atom
+       (println "=" p)
+
+       :map
+       ; traverse deeper
+       (doseq [leaf (seq root)]
+         (traverse (second leaf) (conj path (first leaf))))
+
+       :vector
+       (traverse (apply assoc {} (interleave (range) root)) path)))))
+
+; TODO consider vectors where values can be Insertions and Deletions
 
 (comment
   (def types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json")))
@@ -70,11 +108,14 @@
   (prn (ddiff/diff test-tree {:a 2 :c 3 :e [1 2 5 4]}))
 
   (def test-diff
-    (ddiff/minimize
-      (ddiff/diff {:a 1 :b 2 :d {:e 6} :g [1 2 4]}
-                  {:a 1 :d {:e {:f 6}} :g [1 2 3 4]})))
+    ;(ddiff/minimize
+      (ddiff/diff {:same 1 :rm 2 :rename 4 :d {:e 6} :reorder [1 2 4 3]}
+                  {:same 1 :add 3 :renamed 4 :d {:e {:f 6}} :reorder [1 2 3 4]})
+     ;)
+    )
   (prn test-diff)
   (traverse test-diff)
 
   (traverse (get (second ver-diff) "resource"))
+  (traverse ver-diff)
   )
