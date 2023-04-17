@@ -32,13 +32,17 @@
       (catch ClassCastException _e v))))
 
 (defn tag [k v]
-  (cond
-    (= (type v) Mismatch) :mismatch
-    (= (type k) Deletion) :deletion
-    (= (type k) Insertion) :insertion
-    (map? v) :map
-    (vector? v) :vector
-    :else :atom))
+  (let [key-type (type k)
+        value-type (type v)]
+    (cond
+      (= value-type Mismatch) :mismatch
+      (or (= key-type Deletion)
+          (= value-type Deletion)) :deletion
+      (or (= key-type Insertion)
+          (= value-type Insertion)) :insertion
+      (map? v) :map
+      (vector? v) :vector
+      :else :atom)))
 
 (defn join-path [path]
   (str/join "." (map get-name path)))
@@ -56,16 +60,16 @@
    (let [p (join-path path)]
      (case (tag (last path) root)
        :mismatch
-       (println p ":" (val->str (:- root)) "->" (val->str (:+ root)))
+       (println p "=" (val->str (:- root)) "->" (val->str (:+ root)))
 
        :deletion
-       (println "-" p)
+       (println "-" p "=" (-> root strip-diff-record val->str))
 
        :insertion
-       (println "+" p)
+       (println "+" p "=" (-> root strip-diff-record val->str))
 
        :atom
-       (println "=" p)
+       (println p "=" (val->str root))
 
        :map
        ; traverse deeper
@@ -74,8 +78,6 @@
 
        :vector
        (traverse (apply assoc {} (interleave (range) root)) path)))))
-
-; TODO consider vectors where values can be Insertions and Deletions
 
 (comment
   (def types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json")))
@@ -110,7 +112,7 @@
   (def test-diff
     ;(ddiff/minimize
       (ddiff/diff {:same 1 :rm 2 :rename 4 :d {:e 6} :reorder [1 2 4 3]}
-                  {:same 1 :add 3 :renamed 4 :d {:e {:f 6}} :reorder [1 2 3 4]})
+                  {:same 1 :add 3 :renamed 4 :d {:e {:f 6}} :reorder [2 2 3 4]})
      ;)
     )
   (prn test-diff)
