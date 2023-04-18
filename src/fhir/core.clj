@@ -1,7 +1,6 @@
 (ns fhir.core
   (:require [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.data :refer [diff]]
             [lambdaisland.deep-diff2 :as ddiff]))
 
 (def Mismatch lambdaisland.deep_diff2.diff_impl.Mismatch)
@@ -29,7 +28,7 @@
   (let [v (strip-diff-record value)]
     (try
       (name v)
-      (catch ClassCastException _e v))))
+      (catch Exception _e v))))
 
 (defn tag [k v]
   (let [key-type (type k)
@@ -49,10 +48,13 @@
 
 (defn val->str [value]
   (let [s (str value)
-        lim 32]
+        lim 64]
     (if (> (count s) lim)
       (str (subs s 0 lim) "...")
       s)))
+
+(defn extract-key [coll key-name]
+  (into {} (map #(vector (get % key-name) %) coll)))
 
 (defn traverse
   ([root] (traverse root []))
@@ -60,7 +62,7 @@
    (let [p (join-path path)]
      (case (tag (last path) root)
        :mismatch
-       (println p "=" (val->str (:- root)) "->" (val->str (:+ root)))
+       (println "~" p "=" (val->str (:- root)) "->" (val->str (:+ root)))
 
        :deletion
        (println "-" p "=" (-> root strip-diff-record val->str))
@@ -69,7 +71,7 @@
        (println "+" p "=" (-> root strip-diff-record val->str))
 
        :atom
-       (println p "=" (val->str root))
+       (println "=" p "=" (val->str root))
 
        :map
        ; traverse deeper
@@ -77,34 +79,44 @@
          (traverse (second leaf) (conj path (first leaf))))
 
        :vector
-       (traverse (apply assoc {} (interleave (range) root)) path)))))
+       (let [x (first root)]
+         (cond
+           (get x "key") (traverse (extract-key root "key") path)
+           (get x "id") (traverse (extract-key root "id") path)
+           :else (traverse (apply assoc {} (interleave (range) root)) path)))))))
+
+(defn get-entries [types]
+  (into {} (map #(vector (strip-url (get % "fullUrl")) %) (get types "entry"))))
+
+(defn diff-types
+  ([xs ys] (diff-types xs ys true))
+  ([xs ys minimize]
+   (traverse
+     ((if minimize ddiff/minimize identity)
+       (ddiff/diff (get-entries xs) (get-entries ys))))))
 
 (comment
   (def types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json")))
-  (def entry-r5 (get types-r5 "entry"))
   (def types-r4 (json/parse-string (slurp "spec/r4/profiles-types.json")))
-  (def entry-r4 (get types-r4 "entry"))
+
+  (diff-types types-r4 types-r5)
 
   ; ("resourceType" "id" "meta" "type" "entry")
   (prn (keys types-r5))
 
   ; ("fullUrl" "resource")
-  (prn (keys (first entry-r5)))
+  (-> types-r5 (get "entry") first keys prn)
 
   ; ("Element" "BackboneElement" "base64Binary" "boolean" "canonical" "code" "date" "dateTime" "decimal" "id" "instant" "integer" "integer64" "markdown" "oid" "positiveInt" "string" "time" "unsignedInt" "uri" "url" "uuid" "xhtml" "Address" "Age" "Annotation" "Attachment" "Availability" "BackboneType" "Base" "CodeableConcept" "CodeableReference" "Coding" "ContactDetail" "ContactPoint" "Contributor" "Count" "DataRequirement" "DataType" "Distance" "Dosage" "Duration" "ElementDefinition" "Expression" "ExtendedContactDetail" "Extension" "HumanName" "Identifier" "MarketingStatus" "Meta" "MonetaryComponent" "Money" "Narrative" "ParameterDefinition" "Period" "PrimitiveType" "ProductShelfLife" "Quantity" "Range" "Ratio" "RatioRange" "Reference" "RelatedArtifact" "SampledData" "Signature" "Timing" "TriggerDefinition" "UsageContext" "VirtualServiceDetail" "MoneyQuantity" "SimpleQuantity")
-  (prn (map #(strip-url (get % "fullUrl")) entry-r5))
+  (prn (map #(strip-url (get % "fullUrl")) (get types-r5 "entry")))
 
   ; ("abstract" "url" "experimental" "id" "snapshot" "name" "extension" "status"
   ; "text" "kind" "jurisdiction" "fhirVersion" "type" "baseDefinition"
   ; "publisher" "mapping" "version" "meta" "date" "differential" "resourceType"
   ; "contact" "derivation" "description")
-  (prn (keys (get (first entry-r5) "resource")))
+  (-> types-r5 (get "entry") first (get "resource") keys prn)
 
-  (prn (diff {:a 1 :b 2} {:a 1 :c 3}))
-  (prn (diff entry-r5 entry-r4))
-
-  (def ver-diff (get (ddiff/minimize (ddiff/diff types-r5 types-r4)) "entry"))
-  (prn (keys (get (second ver-diff) "resource")))
+  ;(def ver-diff (get (ddiff/minimize (ddiff/diff types-r5 types-r4)) "entry"))
 
   (def test-tree {:a 1 :b 2 :d {:e {:f 4} :g 5 :h 6} :e [1 2 3 4]})
   (prn (ddiff/diff test-tree {:a 2 :c 3 :e [1 2 5 4]}))
@@ -118,6 +130,6 @@
   (prn test-diff)
   (traverse test-diff)
 
-  (traverse (get (second ver-diff) "resource"))
+  (def ver-diff (ddiff/diff types-r4 types-r5))
   (traverse ver-diff)
   )
