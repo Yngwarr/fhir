@@ -1,6 +1,7 @@
 (ns fhir.core
   (:require [cheshire.core :as json]
             [clojure.string :as str]
+            [clojure.walk :refer [postwalk]]
             [lambdaisland.deep-diff2 :as ddiff]))
 
 (def Mismatch lambdaisland.deep_diff2.diff_impl.Mismatch)
@@ -30,7 +31,6 @@
       (name v)
       (catch Exception _e v))))
 
-; TODO add the ability to determine a rename
 (defn tag [k v]
   (let [key-type (type k)
         value-type (type v)]
@@ -81,26 +81,43 @@
          (traverse (second leaf) minimize (conj path (first leaf))))
 
        :vector
-       (let [x (first root)]
-         (cond
-           (get x "key") (traverse (extract-key root "key") minimize path)
-           (get x "id") (traverse (extract-key root "id") minimize path)
-           :else (traverse
-                   (apply assoc {} (interleave (range) root)) minimize path)))))))
+       (traverse (apply assoc {} (interleave (range) root)) minimize path)))))
 
-(defn get-entries [types]
-  (into {} (map #(vector (strip-url (get % "fullUrl")) %) (get types "entry"))))
+(defn get-entries
+  ([types] (get-entries types true))
+  ([types short-url]
+   (into {} (map #(vector ((if short-url strip-url identity)
+                           (get % "fullUrl")) %)
+                 (get types "entry")))))
+
+(defn replace-vectors [value]
+  (if (vector? value)
+    (let [x (first value)]
+      (cond
+        (get x "key") (extract-key value "key")
+        (get x "id") (extract-key value "id")
+        :else
+        ;(apply assoc {} (interleave (range) value))
+        value))
+    value))
 
 (defn diff-types
   ([xs ys] (diff-types xs ys true))
   ([xs ys minimize]
-   (traverse (ddiff/diff (get-entries xs) (get-entries ys)) minimize)))
+   (traverse
+     (ddiff/diff
+       (postwalk replace-vectors (get-entries xs))
+       (postwalk replace-vectors (get-entries ys)))
+     minimize)))
 
 (comment
   (def types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json")))
   (def types-r4 (json/parse-string (slurp "spec/r4/profiles-types.json")))
+  (def resources-r5 (json/parse-string (slurp "spec/r5/profiles-resources.json")))
+  (def resources-r4 (json/parse-string (slurp "spec/r4/profiles-resources.json")))
 
-  (diff-types types-r4 types-r5 true)
+  (diff-types types-r4 types-r5)
+  (diff-types resources-r4 resources-r5)
 
   ; ("resourceType" "id" "meta" "type" "entry")
   (prn (keys types-r5))
@@ -133,4 +150,8 @@
 
   (def ver-diff (ddiff/diff types-r4 types-r5))
   (traverse ver-diff)
+
+  (postwalk replace-vectors {"a" [{"key" "a" "value" 1} {"key" "b" "value" 2}]
+                             "b" {"c" [{"id" "d" "value" 3} {"id" "e" "value" 4}]}
+                             "c" [1 2 3 4]})
   )
