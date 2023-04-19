@@ -110,6 +110,12 @@
        (postwalk replace-vectors (get-entries ys)))
      minimize)))
 
+; TODO set files with args
+(defn -main [& args]
+  (let [types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json"))
+        types-r4 (json/parse-string (slurp "spec/r4/profiles-types.json"))]
+    (diff-types types-r4 types-r5)))
+
 (comment
   (def types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json")))
   (def types-r4 (json/parse-string (slurp "spec/r4/profiles-types.json")))
