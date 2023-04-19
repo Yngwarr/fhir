@@ -30,6 +30,7 @@
       (name v)
       (catch Exception _e v))))
 
+; TODO add the ability to determine a rename
 (defn tag [k v]
   (let [key-type (type k)
         value-type (type v)]
@@ -57,8 +58,9 @@
   (into {} (map #(vector (get % key-name) %) coll)))
 
 (defn traverse
-  ([root] (traverse root []))
-  ([root path]
+  ([root] (traverse root true []))
+  ([root minimize] (traverse root minimize []))
+  ([root minimize path]
    (let [p (join-path path)]
      (case (tag (last path) root)
        :mismatch
@@ -71,19 +73,20 @@
        (println "+" p "=" (-> root strip-diff-record val->str))
 
        :atom
-       (println "=" p "=" (val->str root))
+       (when (not minimize) (println "=" p "=" (val->str root)))
 
        :map
        ; traverse deeper
        (doseq [leaf (seq root)]
-         (traverse (second leaf) (conj path (first leaf))))
+         (traverse (second leaf) minimize (conj path (first leaf))))
 
        :vector
        (let [x (first root)]
          (cond
-           (get x "key") (traverse (extract-key root "key") path)
-           (get x "id") (traverse (extract-key root "id") path)
-           :else (traverse (apply assoc {} (interleave (range) root)) path)))))))
+           (get x "key") (traverse (extract-key root "key") minimize path)
+           (get x "id") (traverse (extract-key root "id") minimize path)
+           :else (traverse
+                   (apply assoc {} (interleave (range) root)) minimize path)))))))
 
 (defn get-entries [types]
   (into {} (map #(vector (strip-url (get % "fullUrl")) %) (get types "entry"))))
@@ -91,15 +94,13 @@
 (defn diff-types
   ([xs ys] (diff-types xs ys true))
   ([xs ys minimize]
-   (traverse
-     ((if minimize ddiff/minimize identity)
-       (ddiff/diff (get-entries xs) (get-entries ys))))))
+   (traverse (ddiff/diff (get-entries xs) (get-entries ys)) minimize)))
 
 (comment
   (def types-r5 (json/parse-string (slurp "spec/r5/profiles-types.json")))
   (def types-r4 (json/parse-string (slurp "spec/r4/profiles-types.json")))
 
-  (diff-types types-r4 types-r5)
+  (diff-types types-r4 types-r5 true)
 
   ; ("resourceType" "id" "meta" "type" "entry")
   (prn (keys types-r5))
